@@ -81,6 +81,19 @@ def init_db() -> None:
             );
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                contact_request_id INTEGER NOT NULL,
+                sender_id INTEGER NOT NULL,
+                body TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (contact_request_id) REFERENCES contact_requests(id) ON DELETE CASCADE,
+                FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            """
+        )
         conn.commit()
 
 
@@ -374,9 +387,154 @@ def create_contact_request() -> tuple[dict, int]:
             """,
             (user["id"], nanny_id, message, "pending", created_at),
         )
+        contact_request_id = cursor.lastrowid
+        conn.execute(
+            """
+            INSERT INTO messages (contact_request_id, sender_id, body, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (contact_request_id, user["id"], message, created_at),
+        )
         conn.commit()
 
-    return {"id": cursor.lastrowid, "status": "pending"}, 201
+    return {"id": contact_request_id, "status": "pending"}, 201
+
+
+@app.get("/api/contact_requests")
+def list_contact_requests() -> tuple[dict, int]:
+    user = get_user_from_token()
+    if not user:
+        return {"error": "unauthorized"}, 401
+
+    with get_db() as conn:
+        if user["role"] == "family":
+            rows = conn.execute(
+                """
+                SELECT cr.*, np.full_name AS nanny_name
+                FROM contact_requests cr
+                LEFT JOIN nanny_profiles np ON np.user_id = cr.nanny_id
+                WHERE cr.family_id = ?
+                ORDER BY cr.created_at DESC
+                """,
+                (user["id"],),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT cr.*, u.email AS family_email
+                FROM contact_requests cr
+                JOIN users u ON u.id = cr.family_id
+                WHERE cr.nanny_id = ?
+                ORDER BY cr.created_at DESC
+                """,
+                (user["id"],),
+            ).fetchall()
+
+    return {"results": [dict(row) for row in rows]}, 200
+
+
+@app.get("/api/messages")
+def list_messages() -> tuple[dict, int]:
+    user = get_user_from_token()
+    if not user:
+        return {"error": "unauthorized"}, 401
+
+    contact_request_id = request.args.get("contact_request_id")
+    if not contact_request_id:
+        return {"error": "contact_request_id is required"}, 400
+
+    with get_db() as conn:
+        allowed = conn.execute(
+            """
+            SELECT id FROM contact_requests
+            WHERE id = ? AND (family_id = ? OR nanny_id = ?)
+            """,
+            (contact_request_id, user["id"], user["id"]),
+        ).fetchone()
+        if not allowed:
+            return {"error": "not found"}, 404
+
+        rows = conn.execute(
+            """
+            SELECT m.*, u.email AS sender_email
+            FROM messages m
+            JOIN users u ON u.id = m.sender_id
+            WHERE m.contact_request_id = ?
+            ORDER BY m.created_at ASC
+            """,
+            (contact_request_id,),
+        ).fetchall()
+
+    return {"results": [dict(row) for row in rows]}, 200
+
+
+@app.post("/api/messages")
+def create_message() -> tuple[dict, int]:
+    user = get_user_from_token()
+    if not user:
+        return {"error": "unauthorized"}, 401
+
+    payload = request.get_json(silent=True) or {}
+    contact_request_id = payload.get("contact_request_id")
+    body = (payload.get("body") or "").strip()
+
+    if not contact_request_id or not body:
+        return {"error": "contact_request_id and body are required"}, 400
+
+    with get_db() as conn:
+        allowed = conn.execute(
+            """
+            SELECT id FROM contact_requests
+            WHERE id = ? AND (family_id = ? OR nanny_id = ?)
+            """,
+            (contact_request_id, user["id"], user["id"]),
+        ).fetchone()
+        if not allowed:
+            return {"error": "not found"}, 404
+
+        created_at = now_iso()
+        cursor = conn.execute(
+            """
+            INSERT INTO messages (contact_request_id, sender_id, body, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (contact_request_id, user["id"], body, created_at),
+        )
+        conn.commit()
+
+    return {
+        "id": cursor.lastrowid,
+        "contact_request_id": contact_request_id,
+        "sender_id": user["id"],
+        "body": body,
+        "created_at": created_at,
+    }, 201
+
+
+@app.get("/api/messages/last")
+def last_message() -> tuple[dict, int]:
+    user = get_user_from_token()
+    if not user:
+        return {"error": "unauthorized"}, 401
+
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT m.body, m.created_at, u.email AS sender_email
+            FROM messages m
+            JOIN contact_requests cr ON cr.id = m.contact_request_id
+            JOIN users u ON u.id = m.sender_id
+            WHERE cr.family_id = ? OR cr.nanny_id = ?
+            ORDER BY m.created_at DESC
+            LIMIT 1
+            """,
+            (user["id"], user["id"]),
+        ).fetchone()
+
+    if not row:
+        return {"message": None}, 200
+
+    return {"message": dict(row)}, 200
 
 
 if __name__ == "__main__":

@@ -61,6 +61,10 @@ export default function HomeScreen() {
   const [results, setResults] = useState<NannyProfile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<NannyProfile | null>(null);
   const [contactMessage, setContactMessage] = useState("");
+  const showSearch = true;
+  const [savedProfile, setSavedProfile] = useState<NannyProfile | null>(null);
+  const [profileSuccess, setProfileSuccess] = useState(false);
+  const [contactSuccess, setContactSuccess] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -197,6 +201,8 @@ export default function HomeScreen() {
         return;
       }
 
+      setSavedProfile(data);
+      setProfileSuccess(true);
       setStatus("Profile saved");
     } catch (err) {
       if (err instanceof Error) {
@@ -300,6 +306,7 @@ export default function HomeScreen() {
         setLoading(false);
         return;
       }
+      setContactSuccess(true);
       setStatus("Contact request sent");
       setContactMessage("");
     } catch (err) {
@@ -316,91 +323,110 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>Find My Nanny</Text>
-        <Text style={styles.subtitle}>MVP Flow</Text>
+        {user ? (
+          <View style={styles.topBar}>
+            <View style={styles.avatarCircle}>
+              <Text style={styles.avatarText}>
+                {user.email ? user.email.charAt(0).toUpperCase() : "U"}
+              </Text>
+            </View>
+            <View style={styles.topBarActions}>
+              <TouchableOpacity
+                style={styles.topBarButton}
+                onPress={() => setSelectedProfile(savedProfile)}
+                disabled={!savedProfile}
+              >
+                <Text style={styles.topBarButtonText}>Check profile</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.topBarButton} onPress={logout}>
+                <Text style={styles.topBarButtonText}>Logout</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Auth</Text>
-          <View style={styles.roleRow}>
+        <View style={styles.hero}>
+          <Text style={styles.title}>Find My Nanny</Text>
+          <Text style={styles.subtitle}>
+            A trusted marketplace for families and nannies to connect.
+          </Text>
+          <View style={styles.heroPill}>
+            <Text style={styles.heroPillText}>Simple • Private • Local</Text>
+          </View>
+        </View>
+
+        {!user ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Auth</Text>
+
+            {authMode === "register" ? (
+              <View style={styles.roleRow}>
+                <TouchableOpacity
+                  style={[styles.roleButton, role === "nanny" && styles.roleActive]}
+                  onPress={() => setRole("nanny")}
+                >
+                  <Text style={styles.roleText}>Nanny</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.roleButton, role === "family" && styles.roleActive]}
+                  onPress={() => setRole("family")}
+                >
+                  <Text style={styles.roleText}>Family</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              value={email}
+              onChangeText={setEmail}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+            />
+
             <TouchableOpacity
-              style={[
-                styles.roleButton,
-                authMode === "register" && styles.roleActive,
-              ]}
-              onPress={() => setAuthMode("register")}
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={authMode === "register" ? register : login}
+              disabled={loading}
             >
-              <Text style={styles.roleText}>Register</Text>
+              <Text style={styles.buttonText}>
+                {loading
+                  ? "Working..."
+                  : authMode === "register"
+                  ? "Register"
+                  : "Login"}
+              </Text>
             </TouchableOpacity>
+
             <TouchableOpacity
-              style={[styles.roleButton, authMode === "login" && styles.roleActive]}
-              onPress={() => setAuthMode("login")}
+              style={styles.inlineLink}
+              onPress={() =>
+                setAuthMode(authMode === "register" ? "login" : "register")
+              }
             >
-              <Text style={styles.roleText}>Login</Text>
+              <Text style={styles.inlineLinkText}>
+                {authMode === "register"
+                  ? "Have an account? Login here."
+                  : "New here? Create an account."}
+              </Text>
             </TouchableOpacity>
           </View>
-
-          {authMode === "register" ? (
-            <View style={styles.roleRow}>
-              <TouchableOpacity
-                style={[styles.roleButton, role === "nanny" && styles.roleActive]}
-                onPress={() => setRole("nanny")}
-              >
-                <Text style={styles.roleText}>Nanny</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.roleButton, role === "family" && styles.roleActive]}
-                onPress={() => setRole("family")}
-              >
-                <Text style={styles.roleText}>Family</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            value={email}
-            onChangeText={setEmail}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-          />
-
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={authMode === "register" ? register : login}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading
-                ? "Working..."
-                : authMode === "register"
-                ? "Register"
-                : "Login"}
-            </Text>
-          </TouchableOpacity>
-
-          {user ? (
-            <View style={styles.inlineRow}>
-              <Text style={styles.helperText}>
-                Logged in: {user.email} ({user.role})
-              </Text>
-              <TouchableOpacity style={styles.linkButton} onPress={logout}>
-                <Text style={styles.linkText}>Logout</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-        </View>
+        ) : null}
 
         {user && user.role === "nanny" ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Nanny Profile</Text>
+            <Text style={styles.sectionHint}>
+              Add the basics so families can find you later.
+            </Text>
             <TextInput
               style={styles.input}
               placeholder="Full name"
@@ -489,67 +515,103 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Search Nannies</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="City"
-            value={searchFilters.city}
-            onChangeText={(value) =>
-              setSearchFilters({ ...searchFilters, city: value })
-            }
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Zip"
-            keyboardType="numeric"
-            value={searchFilters.zip}
-            onChangeText={(value) =>
-              setSearchFilters({ ...searchFilters, zip: value })
-            }
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Min experience"
-            keyboardType="numeric"
-            value={searchFilters.min_experience}
-            onChangeText={(value) =>
-              setSearchFilters({ ...searchFilters, min_experience: value })
-            }
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Max rate"
-            keyboardType="numeric"
-            value={searchFilters.max_rate}
-            onChangeText={(value) =>
-              setSearchFilters({ ...searchFilters, max_rate: value })
-            }
-          />
-
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={searchProfiles}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>{loading ? "Working..." : "Search"}</Text>
-          </TouchableOpacity>
-
-          {results.map((profile) => (
+        {profileSuccess && savedProfile ? (
+          <View style={styles.successCard}>
+            <Text style={styles.successTitle}>Profile live</Text>
+            <Text style={styles.successSubtitle}>
+              Families can now find you by city or zip.
+            </Text>
+            <View style={styles.successSummary}>
+              <Text style={styles.successSummaryText}>
+                {savedProfile.full_name}
+              </Text>
+              <Text style={styles.successSummaryMeta}>
+                {savedProfile.city} • {savedProfile.availability} • ${savedProfile.preferred_rate}/hr
+              </Text>
+            </View>
             <TouchableOpacity
-              key={profile.id}
-              style={styles.resultCard}
-              onPress={() => loadProfile(profile.id)}
+              style={styles.button}
+              onPress={() => {
+                setSelectedProfile(savedProfile);
+                setProfileSuccess(false);
+              }}
             >
-              <Text style={styles.resultName}>{profile.full_name}</Text>
-              <Text style={styles.resultMeta}>
-                {profile.city}, {profile.zip} • {profile.years_experience} yrs
+              <Text style={styles.buttonText}>Preview profile</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setProfileSuccess(false)}
+            >
+              <Text style={styles.secondaryButtonText}>Edit profile</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {showSearch ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Search Nannies</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="City"
+              value={searchFilters.city}
+              onChangeText={(value) =>
+                setSearchFilters({ ...searchFilters, city: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Zip"
+              keyboardType="numeric"
+              value={searchFilters.zip}
+              onChangeText={(value) =>
+                setSearchFilters({ ...searchFilters, zip: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Min experience"
+              keyboardType="numeric"
+              value={searchFilters.min_experience}
+              onChangeText={(value) =>
+                setSearchFilters({ ...searchFilters, min_experience: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Max rate"
+              keyboardType="numeric"
+              value={searchFilters.max_rate}
+              onChangeText={(value) =>
+                setSearchFilters({ ...searchFilters, max_rate: value })
+              }
+            />
+
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={searchProfiles}
+              disabled={loading}
+            >
+              <Text style={styles.buttonText}>
+                {loading ? "Working..." : "Search"}
               </Text>
             </TouchableOpacity>
-          ))}
-        </View>
 
-        {selectedProfile ? (
+            {results.map((profile) => (
+              <TouchableOpacity
+                key={profile.id}
+                style={styles.resultCard}
+                onPress={() => loadProfile(profile.id)}
+              >
+                <Text style={styles.resultName}>{profile.full_name}</Text>
+                <Text style={styles.resultMeta}>
+                  {profile.city}, {profile.zip} • {profile.years_experience} yrs
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
+
+        {showSearch && selectedProfile ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Profile</Text>
             <Text style={styles.resultName}>{selectedProfile.full_name}</Text>
@@ -563,7 +625,9 @@ export default function HomeScreen() {
             <Text style={styles.detailText}>
               Availability: {selectedProfile.availability}
             </Text>
-            <Text style={styles.detailText}>Rate: {selectedProfile.preferred_rate}</Text>
+            <Text style={styles.detailText}>
+              Rate: {selectedProfile.preferred_rate}
+            </Text>
             <Text style={styles.detailText}>
               Contact: {selectedProfile.contact_info}
             </Text>
@@ -586,6 +650,35 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
+        {contactSuccess && selectedProfile ? (
+          <View style={styles.successCard}>
+            <Text style={styles.successTitle}>Request sent</Text>
+            <Text style={styles.successSubtitle}>
+              You’ll be notified when the nanny responds.
+            </Text>
+            <View style={styles.successSummary}>
+              <Text style={styles.successSummaryText}>
+                {selectedProfile.full_name}
+              </Text>
+              <Text style={styles.successSummaryMeta}>
+                {selectedProfile.city}
+              </Text>
+            </View>
+            <TouchableOpacity style={styles.button} onPress={() => setContactSuccess(false)}>
+              <Text style={styles.buttonText}>View request status</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setContactSuccess(false)}
+            >
+              <Text style={styles.secondaryButtonText}>Send another request</Text>
+            </TouchableOpacity>
+            <Text style={styles.successFootnote}>
+              Status tracking is coming soon.
+            </Text>
+          </View>
+        ) : null}
+
         {status ? <Text style={styles.status}>{status}</Text> : null}
       </ScrollView>
     </SafeAreaView>
@@ -595,23 +688,40 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
     justifyContent: "center",
-    backgroundColor: "#F5F1EB",
+    backgroundColor: "#F7F3EE",
   },
   scroll: {
-    paddingBottom: 40,
+    paddingHorizontal: 24,
+    paddingBottom: 48,
+    paddingTop: 12,
+  },
+  hero: {
+    paddingVertical: 18,
+    paddingHorizontal: 4,
   },
   title: {
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: "700",
-    color: "#1D1A16",
+    color: "#1F1A17",
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 16,
-    color: "#6B6257",
-    marginBottom: 24,
+    color: "#5F5852",
+    marginBottom: 12,
+  },
+  heroPill: {
+    alignSelf: "flex-start",
+    backgroundColor: "#D8ECEB",
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  heroPillText: {
+    color: "#1F5A59",
+    fontWeight: "600",
+    fontSize: 12,
   },
   roleRow: {
     flexDirection: "row",
@@ -621,34 +731,34 @@ const styles = StyleSheet.create({
   roleButton: {
     flex: 1,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#B9AFA2",
+    borderColor: "#E7DFD6",
     alignItems: "center",
-    backgroundColor: "#FFF9F2",
+    backgroundColor: "#FFFFFF",
   },
   roleActive: {
-    backgroundColor: "#E3D5C6",
-    borderColor: "#9B8570",
+    backgroundColor: "#D8ECEB",
+    borderColor: "#2F7D7B",
   },
   roleText: {
     fontSize: 16,
-    color: "#1D1A16",
+    color: "#1F1A17",
     fontWeight: "600",
   },
   input: {
     borderWidth: 1,
-    borderColor: "#C9BFB3",
-    borderRadius: 10,
+    borderColor: "#E7DFD6",
+    borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
     backgroundColor: "#FFFFFF",
     marginBottom: 12,
   },
   button: {
-    backgroundColor: "#1D1A16",
+    backgroundColor: "#2F7D7B",
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: 14,
     alignItems: "center",
     marginTop: 8,
   },
@@ -660,37 +770,73 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
+  inlineLink: {
+    marginTop: 12,
+    alignSelf: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  inlineLinkText: {
+    color: "#1F5A59",
+    fontSize: 13,
+    fontWeight: "600",
+  },
   section: {
     marginTop: 20,
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: "#FFF9F2",
+    padding: 18,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#E3D5C6",
+    borderColor: "#E7DFD6",
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: "700",
-    color: "#1D1A16",
+    color: "#1F1A17",
+    marginBottom: 8,
+  },
+  sectionHint: {
+    fontSize: 13,
+    color: "#5F5852",
     marginBottom: 12,
   },
-  inlineRow: {
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 8,
+    marginBottom: 8,
   },
-  helperText: {
-    color: "#6B6257",
-    fontSize: 14,
+  avatarCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#D8ECEB",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#2F7D7B",
   },
-  linkButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+  avatarText: {
+    color: "#1F5A59",
+    fontWeight: "700",
+    fontSize: 16,
   },
-  linkText: {
-    color: "#1D1A16",
+  topBarActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  topBarButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E7DFD6",
+  },
+  topBarButtonText: {
+    fontSize: 12,
     fontWeight: "600",
+    color: "#1F5A59",
   },
   resultCard: {
     marginTop: 12,
@@ -698,23 +844,81 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#E3D5C6",
+    borderColor: "#E7DFD6",
   },
   resultName: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#1D1A16",
+    color: "#1F1A17",
   },
   resultMeta: {
-    color: "#6B6257",
+    color: "#5F5852",
     marginTop: 4,
   },
   detailText: {
-    color: "#1D1A16",
+    color: "#1F1A17",
     marginTop: 6,
   },
   status: {
     marginTop: 16,
-    color: "#1D1A16",
+    color: "#1F1A17",
+  },
+  successCard: {
+    marginTop: 20,
+    padding: 20,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#D8ECEB",
+    shadowColor: "#1F5A59",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#1F1A17",
+  },
+  successSubtitle: {
+    marginTop: 6,
+    color: "#5F5852",
+    fontSize: 14,
+  },
+  successSummary: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "#D8ECEB",
+  },
+  successSummaryText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1F1A17",
+  },
+  successSummaryMeta: {
+    marginTop: 4,
+    color: "#1F5A59",
+    fontWeight: "600",
+  },
+  secondaryButton: {
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E7DFD6",
+    backgroundColor: "#FFFFFF",
+  },
+  secondaryButtonText: {
+    color: "#1F5A59",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  successFootnote: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "#5F5852",
   },
 });

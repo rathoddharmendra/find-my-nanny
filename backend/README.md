@@ -34,3 +34,12 @@ API:
 - POST /api/contact_requests
   header: Authorization: Bearer <token>
   body: {"nanny_id": 1, "message": "Hi, we'd love to chat."}
+- GET /api/contact_requests
+  header: Authorization: Bearer <token>
+- GET /api/messages?contact_request_id=1
+  header: Authorization: Bearer <token>
+- POST /api/messages
+  header: Authorization: Bearer <token>
+  body: {"contact_request_id": 1, "body": "Hello!"}
+- GET /api/messages/last
+  header: Authorization: Bearer <token>
