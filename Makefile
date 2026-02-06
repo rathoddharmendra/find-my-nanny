@@ -9,7 +9,7 @@ dev:
 		-e 'end tell'
 
 backend:
-	@cd backend && python app.py
+	@cd backend && ./scripts/run-backend.sh
 
 ws:
 	@cd backend/ws-server && npm install && npm start
