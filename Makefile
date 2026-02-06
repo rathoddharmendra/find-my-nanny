@@ -1,15 +1,18 @@
 .PHONY: dev backend ws mobile
 
-dev: backend ws mobile
+dev:
+	@osascript -e 'tell application "Terminal"' \
+		-e 'activate' \
+		-e 'do script "cd /Users/mac_dee/Documents/Find-my-nanny/backend && python app.py"' \
+		-e 'do script "cd /Users/mac_dee/Documents/Find-my-nanny/backend/ws-server && npm install && npm start" in selected tab of the front window' \
+		-e 'do script "cd /Users/mac_dee/Documents/Find-my-nanny/mobile && npm install && npx expo start" in selected tab of the front window' \
+		-e 'end tell'
 
 backend:
-	@echo "Starting backend on http://localhost:5000"
-	@cd backend && python app.py &
+	@cd backend && python app.py
 
 ws:
-	@echo "Starting WS server on ws://localhost:5050"
-	@cd backend/ws-server && npm install && npm start &
+	@cd backend/ws-server && npm install && npm start
 
 mobile:
-	@echo "Starting Expo app"
 	@cd mobile && npm install && npx expo start
