@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   SafeAreaView,
   ScrollView,
@@ -8,7 +8,9 @@ import {
   View,
   StyleSheet,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../config";
+const WS_BASE_URL = "ws://localhost:5050";
 
 type User = {
   id: number;
@@ -30,7 +32,40 @@ type NannyProfile = {
   contact_info: string;
 };
 
+type ContactRequest = {
+  id: number;
+  family_id: number;
+  nanny_id: number;
+  status: string;
+  created_at: string;
+  nanny_name?: string;
+  family_email?: string;
+};
+
+type Message = {
+  id: number;
+  contact_request_id: number;
+  sender_id: number;
+  body: string;
+  created_at: string;
+  sender_email?: string;
+};
+
+type FamilyProfile = {
+  id: number;
+  user_id: number;
+  full_name: string;
+  city: string;
+  zip: string;
+  needs: string;
+  schedule: string;
+  budget: string;
+  bio: string;
+  contact_info: string;
+};
+
 export default function HomeScreen() {
+  const scrollRef = useRef<ScrollView>(null);
   const [role, setRole] = useState<User["role"]>("nanny");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -51,6 +86,16 @@ export default function HomeScreen() {
     preferred_rate: "",
     contact_info: "",
   });
+  const [familyForm, setFamilyForm] = useState({
+    full_name: "",
+    city: "",
+    zip: "",
+    needs: "",
+    schedule: "",
+    budget: "",
+    bio: "",
+    contact_info: "",
+  });
 
   const [searchFilters, setSearchFilters] = useState({
     city: "",
@@ -63,12 +108,48 @@ export default function HomeScreen() {
   const [contactMessage, setContactMessage] = useState("");
   const showSearch = true;
   const [savedProfile, setSavedProfile] = useState<NannyProfile | null>(null);
+  const [savedFamilyProfile, setSavedFamilyProfile] = useState<FamilyProfile | null>(
+    null
+  );
   const [profileSuccess, setProfileSuccess] = useState(false);
   const [contactSuccess, setContactSuccess] = useState(false);
+  const [latestMessage, setLatestMessage] = useState<{
+    body: string;
+    created_at: string;
+    sender_email: string;
+  } | null>(null);
+  const [threads, setThreads] = useState<ContactRequest[]>([]);
+  const [activeThread, setActiveThread] = useState<ContactRequest | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messageDraft, setMessageDraft] = useState("");
+  const wsRef = useRef<WebSocket | null>(null);
+  const [showMessages, setShowMessages] = useState(false);
+  const [searchExpanded, setSearchExpanded] = useState(false);
+  const [showProfileOverlay, setShowProfileOverlay] = useState(false);
+
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const storedToken = await AsyncStorage.getItem("auth_token");
+        if (storedToken) {
+          setToken(storedToken);
+        }
+      } catch (err) {
+        // ignore restore errors
+      }
+    };
+    restoreSession();
+  }, []);
 
   useEffect(() => {
     if (!token) {
       setUser(null);
+      setLatestMessage(null);
+      setThreads([]);
+      setActiveThread(null);
+      setMessages([]);
+      setSavedProfile(null);
+      setSavedFamilyProfile(null);
       return;
     }
     fetch(`${API_BASE_URL}/api/me`, {
@@ -83,7 +164,110 @@ export default function HomeScreen() {
       .catch(() => {
         setUser(null);
       });
+
+    fetch(`${API_BASE_URL}/api/messages/last`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.message) {
+          setLatestMessage(data.message);
+        } else {
+          setLatestMessage(null);
+        }
+      })
+      .catch(() => {
+        setLatestMessage(null);
+      });
+
+    fetch(`${API_BASE_URL}/api/contact_requests`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.results) {
+          setThreads(data.results);
+        } else {
+          setThreads([]);
+        }
+      })
+      .catch(() => {
+        setThreads([]);
+      });
+
+    fetch(`${API_BASE_URL}/api/nanny_profiles/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.id) {
+          setSavedProfile(data);
+        }
+      })
+      .catch(() => {
+        // ignore
+      });
+
+    fetch(`${API_BASE_URL}/api/family_profiles/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.id) {
+          setSavedFamilyProfile(data);
+        }
+      })
+      .catch(() => {
+        // ignore
+      });
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !activeThread) return undefined;
+
+    const ws = new WebSocket(WS_BASE_URL);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(
+        JSON.stringify({
+          type: "subscribe",
+          contact_request_id: activeThread.id,
+        })
+      );
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === "message" && payload.message) {
+          setMessages((prev) => [...prev, payload.message]);
+          setLatestMessage({
+            body: payload.message.body,
+            created_at: payload.message.created_at,
+            sender_email: payload.message.sender_email || "",
+          });
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    return () => {
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "unsubscribe",
+            contact_request_id: activeThread.id,
+          })
+        );
+        ws.close();
+      } catch (err) {
+        // ignore
+      }
+      wsRef.current = null;
+    };
+  }, [token, activeThread?.id]);
 
   const register = async () => {
     setLoading(true);
@@ -103,7 +287,10 @@ export default function HomeScreen() {
         return;
       }
 
-      setStatus(`Registered ${data.email} as ${data.role}`);
+      setToken(data.token);
+      setUser({ id: data.id, email: data.email, role: data.role });
+      await AsyncStorage.setItem("auth_token", data.token);
+      setStatus(`Welcome ${data.email}`);
       setEmail("");
       setPassword("");
     } catch (err) {
@@ -137,6 +324,7 @@ export default function HomeScreen() {
 
       setToken(data.token);
       setUser(data.user);
+      await AsyncStorage.setItem("auth_token", data.token);
       setStatus(`Logged in as ${data.user.email}`);
       setEmail("");
       setPassword("");
@@ -167,9 +355,21 @@ export default function HomeScreen() {
         setStatus("Network error. Check API_BASE_URL.");
       }
     } finally {
+      await AsyncStorage.removeItem("auth_token");
       setToken("");
       setUser(null);
+      setSelectedProfile(null);
+      setProfileSuccess(false);
+      setContactSuccess(false);
+      setLatestMessage(null);
+      setThreads([]);
+      setActiveThread(null);
+      setMessages([]);
+      setMessageDraft("");
+      setSavedProfile(null);
+      setSavedFamilyProfile(null);
       setLoading(false);
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
     }
   };
 
@@ -210,6 +410,40 @@ export default function HomeScreen() {
       } else {
         setStatus("Network error. Check API_BASE_URL.");
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const upsertFamilyProfile = async () => {
+    if (!token) {
+      setStatus("Login required");
+      return;
+    }
+    setLoading(true);
+    setStatus("");
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/family_profiles`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(familyForm),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setStatus(data.error || "Profile save failed");
+        setLoading(false);
+        return;
+      }
+
+      setSavedFamilyProfile(data);
+      setStatus("Profile saved");
+    } catch (err) {
+      setStatus("Network error. Check API_BASE_URL.");
     } finally {
       setLoading(false);
     }
@@ -309,6 +543,14 @@ export default function HomeScreen() {
       setContactSuccess(true);
       setStatus("Contact request sent");
       setContactMessage("");
+      setActiveThread({
+        id: data.id,
+        family_id: user.id,
+        nanny_id: selectedProfile.user_id,
+        status: "pending",
+        created_at: new Date().toISOString(),
+        nanny_name: selectedProfile.full_name,
+      });
     } catch (err) {
       if (err instanceof Error) {
         setStatus(`Network error: ${err.message}`);
@@ -320,9 +562,140 @@ export default function HomeScreen() {
     }
   };
 
+  const loadThreadMessages = async (thread: ContactRequest) => {
+    if (!token) return;
+    setActiveThread(thread);
+    setLoading(true);
+    setStatus("");
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/messages?contact_request_id=${thread.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || "Failed to load messages");
+        setLoading(false);
+        return;
+      }
+      setMessages(data.results || []);
+    } catch (err) {
+      setStatus("Network error. Check API_BASE_URL.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!token || !activeThread || !messageDraft.trim()) return;
+    setLoading(true);
+    setStatus("");
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          contact_request_id: activeThread.id,
+          body: messageDraft.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || "Message failed");
+        setLoading(false);
+        return;
+      }
+      setMessages((prev) => [...prev, data]);
+      setLatestMessage({
+        body: data.body,
+        created_at: data.created_at,
+        sender_email: user?.email || "",
+      });
+      setMessageDraft("");
+    } catch (err) {
+      setStatus("Network error. Check API_BASE_URL.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteThread = async (thread: ContactRequest) => {
+    if (!token) return;
+    setLoading(true);
+    setStatus("");
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/contact_requests/${thread.id}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || "Delete failed");
+        setLoading(false);
+        return;
+      }
+      setThreads((prev) => prev.filter((item) => item.id !== thread.id));
+      if (activeThread?.id === thread.id) {
+        setActiveThread(null);
+        setMessages([]);
+      }
+      setStatus("Conversation deleted");
+    } catch (err) {
+      setStatus("Network error. Check API_BASE_URL.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openMyProfile = async () => {
+    if (!token) return;
+    if (user?.role === "family" && savedFamilyProfile) {
+      setShowProfileOverlay(true);
+      return;
+    }
+    if (user?.role === "nanny" && savedProfile) {
+      setShowProfileOverlay(true);
+      return;
+    }
+    setLoading(true);
+    setStatus("");
+    try {
+      const endpoint =
+        user?.role === "family"
+          ? `${API_BASE_URL}/api/family_profiles/me`
+          : `${API_BASE_URL}/api/nanny_profiles/me`;
+      const res = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || "Profile not found");
+        setLoading(false);
+        return;
+      }
+      if (user?.role === "family") {
+        setSavedFamilyProfile(data);
+      } else {
+        setSavedProfile(data);
+      }
+      setShowProfileOverlay(true);
+    } catch (err) {
+      setStatus("Network error. Check API_BASE_URL.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={styles.scroll} ref={scrollRef}>
         {user ? (
           <View style={styles.topBar}>
             <View style={styles.avatarCircle}>
@@ -332,9 +705,20 @@ export default function HomeScreen() {
             </View>
             <View style={styles.topBarActions}>
               <TouchableOpacity
+                style={styles.iconButton}
+                onPress={() => setShowMessages(true)}
+              >
+                <Text style={styles.iconButtonText}>Msg</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.iconButton}
+                onPress={() => setSearchExpanded((prev) => !prev)}
+              >
+                <Text style={styles.iconButtonText}>Search</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={styles.topBarButton}
-                onPress={() => setSelectedProfile(savedProfile)}
-                disabled={!savedProfile}
+                onPress={openMyProfile}
               >
                 <Text style={styles.topBarButtonText}>Check profile</Text>
               </TouchableOpacity>
@@ -515,6 +899,90 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
+        {user && user.role === "family" ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Family Profile</Text>
+            <Text style={styles.sectionHint}>
+              Tell nannies what you need.
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Full name"
+              value={familyForm.full_name}
+              onChangeText={(value) =>
+                setFamilyForm({ ...familyForm, full_name: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="City"
+              value={familyForm.city}
+              onChangeText={(value) =>
+                setFamilyForm({ ...familyForm, city: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Zip"
+              keyboardType="numeric"
+              value={familyForm.zip}
+              onChangeText={(value) =>
+                setFamilyForm({ ...familyForm, zip: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Needs (e.g. infant care)"
+              value={familyForm.needs}
+              onChangeText={(value) =>
+                setFamilyForm({ ...familyForm, needs: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Schedule"
+              value={familyForm.schedule}
+              onChangeText={(value) =>
+                setFamilyForm({ ...familyForm, schedule: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Budget (e.g. 25/hr)"
+              value={familyForm.budget}
+              onChangeText={(value) =>
+                setFamilyForm({ ...familyForm, budget: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Bio"
+              value={familyForm.bio}
+              onChangeText={(value) =>
+                setFamilyForm({ ...familyForm, bio: value })
+              }
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Contact info"
+              value={familyForm.contact_info}
+              onChangeText={(value) =>
+                setFamilyForm({ ...familyForm, contact_info: value })
+              }
+            />
+
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={upsertFamilyProfile}
+              disabled={loading}
+            >
+              <Text style={styles.buttonText}>
+                {loading ? "Working..." : "Save Profile"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {profileSuccess && savedProfile ? (
           <View style={styles.successCard}>
             <Text style={styles.successTitle}>Profile live</Text>
@@ -547,7 +1015,7 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {showSearch ? (
+        {user && showSearch && searchExpanded ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Search Nannies</Text>
             <TextInput
@@ -611,7 +1079,7 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {showSearch && selectedProfile ? (
+        {user && showSearch && searchExpanded && selectedProfile ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Profile</Text>
             <Text style={styles.resultName}>{selectedProfile.full_name}</Text>
@@ -681,6 +1149,191 @@ export default function HomeScreen() {
 
         {status ? <Text style={styles.status}>{status}</Text> : null}
       </ScrollView>
+      {showProfileOverlay && (savedProfile || savedFamilyProfile) ? (
+        <View style={styles.messageOverlay}>
+          <View style={styles.messageModal}>
+            <View style={styles.messageHeader}>
+              <Text style={styles.sectionTitle}>Your Profile</Text>
+              <TouchableOpacity
+                style={styles.iconButton}
+                onPress={() => setShowProfileOverlay(false)}
+              >
+                <Text style={styles.iconButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+            {user?.role === "family" && savedFamilyProfile ? (
+              <>
+                <View style={styles.successSummary}>
+                  <Text style={styles.successSummaryText}>
+                    {savedFamilyProfile.full_name}
+                  </Text>
+                  <Text style={styles.successSummaryMeta}>
+                    {savedFamilyProfile.city} • {savedFamilyProfile.needs}
+                  </Text>
+                </View>
+                <Text style={styles.detailText}>{savedFamilyProfile.bio}</Text>
+                <Text style={styles.detailText}>
+                  Schedule: {savedFamilyProfile.schedule}
+                </Text>
+                <Text style={styles.detailText}>
+                  Budget: {savedFamilyProfile.budget}
+                </Text>
+                <Text style={styles.detailText}>
+                  Contact: {savedFamilyProfile.contact_info}
+                </Text>
+              </>
+            ) : null}
+            {user?.role === "nanny" && savedProfile ? (
+              <>
+                <View style={styles.successSummary}>
+                  <Text style={styles.successSummaryText}>
+                    {savedProfile.full_name}
+                  </Text>
+                  <Text style={styles.successSummaryMeta}>
+                    {savedProfile.city} • {savedProfile.availability} • $
+                    {savedProfile.preferred_rate}/hr
+                  </Text>
+                </View>
+                <Text style={styles.detailText}>{savedProfile.bio}</Text>
+                <Text style={styles.detailText}>
+                  Services: {savedProfile.services_offered}
+                </Text>
+                <Text style={styles.detailText}>
+                  Contact: {savedProfile.contact_info}
+                </Text>
+              </>
+            ) : null}
+            <TouchableOpacity
+              style={styles.button}
+              onPress={() => {
+                if (user?.role === "family" && savedFamilyProfile) {
+                  setFamilyForm({
+                    full_name: savedFamilyProfile.full_name,
+                    city: savedFamilyProfile.city,
+                    zip: savedFamilyProfile.zip,
+                    needs: savedFamilyProfile.needs,
+                    schedule: savedFamilyProfile.schedule,
+                    budget: savedFamilyProfile.budget,
+                    bio: savedFamilyProfile.bio,
+                    contact_info: savedFamilyProfile.contact_info,
+                  });
+                } else if (savedProfile) {
+                  setProfileForm({
+                    full_name: savedProfile.full_name,
+                    city: savedProfile.city,
+                    zip: savedProfile.zip,
+                    years_experience: String(savedProfile.years_experience),
+                    availability: savedProfile.availability,
+                    bio: savedProfile.bio,
+                    services_offered: savedProfile.services_offered,
+                    preferred_rate: String(savedProfile.preferred_rate),
+                    contact_info: savedProfile.contact_info,
+                  });
+                }
+                setShowProfileOverlay(false);
+                scrollRef.current?.scrollTo({ y: 0, animated: true });
+              }}
+            >
+              <Text style={styles.buttonText}>Edit profile</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+      {showMessages && user ? (
+        <View style={styles.messageOverlay}>
+          <View style={styles.messageModal}>
+            <View style={styles.messageHeader}>
+              <Text style={styles.sectionTitle}>Messages</Text>
+              <TouchableOpacity
+                style={styles.iconButton}
+                onPress={() => setShowMessages(false)}
+              >
+                <Text style={styles.iconButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.messageBodyRow}>
+              <View style={styles.messageListPane}>
+                {threads.length === 0 ? (
+                  <Text style={styles.sectionHint}>No messages yet.</Text>
+                ) : (
+                  threads.map((thread) => (
+                    <TouchableOpacity
+                      key={thread.id}
+                      style={styles.messageListItem}
+                      onPress={() => loadThreadMessages(thread)}
+                    >
+                      <View style={styles.messageListRow}>
+                        <View style={styles.messageListText}>
+                          <Text style={styles.resultName}>
+                            {user.role === "family"
+                              ? thread.nanny_name || "Nanny"
+                              : thread.family_email || "Family"}
+                          </Text>
+                          <Text style={styles.resultMeta}>
+                            {thread.status} •{" "}
+                            {new Date(thread.created_at).toLocaleDateString()}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.deleteButton}
+                          onPress={() => deleteThread(thread)}
+                        >
+                          <Text style={styles.deleteButtonText}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+              <View style={styles.messageThreadPane}>
+                {activeThread ? (
+                  <>
+                    <View style={styles.messageThread}>
+                      {messages.map((message) => (
+                        <View
+                          key={message.id}
+                          style={[
+                            styles.messageBubble,
+                            message.sender_id === user.id
+                              ? styles.messageBubbleMine
+                              : styles.messageBubbleTheirs,
+                          ]}
+                        >
+                          <Text style={styles.messageSender}>
+                            {message.sender_id === user.id
+                              ? "You"
+                              : message.sender_email || "Partner"}
+                          </Text>
+                          <Text style={styles.messageBody}>{message.body}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Type a message"
+                      value={messageDraft}
+                      onChangeText={setMessageDraft}
+                    />
+                    <TouchableOpacity
+                      style={[styles.button, loading && styles.buttonDisabled]}
+                      onPress={sendMessage}
+                      disabled={loading}
+                    >
+                      <Text style={styles.buttonText}>
+                        {loading ? "Working..." : "Send message"}
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <Text style={styles.sectionHint}>
+                    Select a conversation to view messages.
+                  </Text>
+                )}
+              </View>
+            </View>
+          </View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -824,6 +1477,20 @@ const styles = StyleSheet.create({
   topBarActions: {
     flexDirection: "row",
     gap: 8,
+    alignItems: "center",
+  },
+  iconButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: "#D8ECEB",
+    borderWidth: 1,
+    borderColor: "#2F7D7B",
+  },
+  iconButtonText: {
+    color: "#1F5A59",
+    fontSize: 11,
+    fontWeight: "700",
   },
   topBarButton: {
     paddingVertical: 8,
@@ -920,5 +1587,96 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 12,
     color: "#5F5852",
+  },
+  messageOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.2)",
+    padding: 12,
+    zIndex: 10,
+  },
+  messageModal: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E7DFD6",
+    padding: 16,
+  },
+  messageHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  messageBodyRow: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 12,
+  },
+  messageListPane: {
+    width: "38%",
+    borderRightWidth: 1,
+    borderRightColor: "#E7DFD6",
+    paddingRight: 10,
+  },
+  messageListItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: "#F7F3EE",
+    marginBottom: 8,
+  },
+  messageThreadPane: {
+    flex: 1,
+  },
+  messageListRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  messageListText: {
+    flex: 1,
+  },
+  deleteButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: "#FFF4E6",
+    borderWidth: 1,
+    borderColor: "#F4D7B6",
+  },
+  deleteButtonText: {
+    color: "#B45309",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  messageThread: {
+    marginTop: 12,
+    gap: 10,
+  },
+  messageBubble: {
+    padding: 12,
+    borderRadius: 14,
+  },
+  messageBubbleMine: {
+    alignSelf: "flex-end",
+    backgroundColor: "#D8ECEB",
+  },
+  messageBubbleTheirs: {
+    alignSelf: "flex-start",
+    backgroundColor: "#F2EDE6",
+  },
+  messageSender: {
+    fontSize: 12,
+    color: "#5F5852",
+    marginBottom: 4,
+  },
+  messageBody: {
+    color: "#1F1A17",
   },
 });

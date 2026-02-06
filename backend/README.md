@@ -6,9 +6,15 @@ Run locally:
 3) pip install -r requirements.txt
 4) python app.py
 
+WS server:
+1) cd ws-server
+2) npm install
+3) npm start
+
 API:
 - POST /api/register
   body: {"email": "test@example.com", "password": "secret", "role": "nanny"}
+  response: {"token": "..."}
 - GET /health
 - POST /api/login
   body: {"email": "test@example.com", "password": "secret"}
@@ -31,10 +37,28 @@ API:
   }
 - GET /api/nanny_profiles?city=Austin&zip=78701&min_experience=2&max_rate=30
 - GET /api/nanny_profiles/<id>
+- GET /api/nanny_profiles/me
+  header: Authorization: Bearer <token>
+- POST /api/family_profiles
+  header: Authorization: Bearer <token>
+  body: {
+    "full_name": "Sam Lee",
+    "city": "Austin",
+    "zip": "78701",
+    "needs": "Infant care",
+    "schedule": "Weekdays",
+    "budget": "25",
+    "bio": "Two kids under 3",
+    "contact_info": "sam@example.com"
+  }
+- GET /api/family_profiles/me
+  header: Authorization: Bearer <token>
 - POST /api/contact_requests
   header: Authorization: Bearer <token>
   body: {"nanny_id": 1, "message": "Hi, we'd love to chat."}
 - GET /api/contact_requests
+  header: Authorization: Bearer <token>
+- DELETE /api/contact_requests/<id>
   header: Authorization: Bearer <token>
 - GET /api/messages?contact_request_id=1
   header: Authorization: Bearer <token>

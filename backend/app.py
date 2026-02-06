@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import sqlite3
+import urllib.request
 from datetime import datetime
 
 from flask import Flask, jsonify, request
@@ -11,6 +13,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(APP_DIR, "app.db")
+WS_PUBLISH_URL = os.getenv("WS_PUBLISH_URL", "http://localhost:5050/publish")
 
 app = Flask(__name__)
 CORS(app)
@@ -60,6 +63,25 @@ def init_db() -> None:
                 bio TEXT NOT NULL,
                 services_offered TEXT NOT NULL,
                 preferred_rate REAL NOT NULL,
+                contact_info TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS family_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE,
+                full_name TEXT NOT NULL,
+                city TEXT NOT NULL,
+                zip TEXT NOT NULL,
+                needs TEXT NOT NULL,
+                schedule TEXT NOT NULL,
+                budget TEXT NOT NULL,
+                bio TEXT NOT NULL,
                 contact_info TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -152,11 +174,21 @@ def register() -> tuple[dict, int]:
                 "INSERT INTO users (email, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
                 (email, password_hash, role, created_at),
             )
+            token = secrets.token_urlsafe(32)
+            conn.execute(
+                "INSERT INTO sessions (user_id, token, created_at) VALUES (?, ?, ?)",
+                (cursor.lastrowid, token, now_iso()),
+            )
             conn.commit()
     except sqlite3.IntegrityError:
         return {"error": "email already registered"}, 409
 
-    return {"id": cursor.lastrowid, "email": email, "role": role}, 201
+    return {
+        "id": cursor.lastrowid,
+        "email": email,
+        "role": role,
+        "token": token,
+    }, 201
 
 
 @app.post("/api/login")
@@ -306,6 +338,90 @@ def upsert_nanny_profile() -> tuple[dict, int]:
     return dict(profile), 200
 
 
+@app.post("/api/family_profiles")
+def upsert_family_profile() -> tuple[dict, int]:
+    user = get_user_from_token()
+    if not user:
+        return {"error": "unauthorized"}, 401
+    if user["role"] != "family":
+        return {"error": "only families can create profiles"}, 403
+
+    payload = request.get_json(silent=True) or {}
+    required_fields = [
+        "full_name",
+        "city",
+        "zip",
+        "needs",
+        "schedule",
+        "budget",
+        "bio",
+        "contact_info",
+    ]
+    missing = [field for field in required_fields if not str(payload.get(field) or "").strip()]
+    if missing:
+        return {"error": f"missing fields: {', '.join(missing)}"}, 400
+
+    created_at = now_iso()
+    updated_at = created_at
+
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM family_profiles WHERE user_id = ?",
+            (user["id"],),
+        ).fetchone()
+
+        if existing:
+            conn.execute(
+                """
+                UPDATE family_profiles
+                SET full_name = ?, city = ?, zip = ?, needs = ?, schedule = ?, budget = ?,
+                    bio = ?, contact_info = ?, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    payload["full_name"].strip(),
+                    payload["city"].strip(),
+                    payload["zip"].strip(),
+                    payload["needs"].strip(),
+                    payload["schedule"].strip(),
+                    payload["budget"].strip(),
+                    payload["bio"].strip(),
+                    payload["contact_info"].strip(),
+                    updated_at,
+                    user["id"],
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO family_profiles
+                    (user_id, full_name, city, zip, needs, schedule, budget, bio, contact_info, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user["id"],
+                    payload["full_name"].strip(),
+                    payload["city"].strip(),
+                    payload["zip"].strip(),
+                    payload["needs"].strip(),
+                    payload["schedule"].strip(),
+                    payload["budget"].strip(),
+                    payload["bio"].strip(),
+                    payload["contact_info"].strip(),
+                    created_at,
+                    updated_at,
+                ),
+            )
+        conn.commit()
+
+        profile = conn.execute(
+            "SELECT * FROM family_profiles WHERE user_id = ?",
+            (user["id"],),
+        ).fetchone()
+
+    return dict(profile), 200
+
+
 @app.get("/api/nanny_profiles")
 def list_nanny_profiles() -> tuple[dict, int]:
     city = (request.args.get("city") or "").strip()
@@ -356,6 +472,46 @@ def get_nanny_profile(profile_id: int) -> tuple[dict, int]:
     return dict(profile), 200
 
 
+@app.get("/api/nanny_profiles/me")
+def get_my_nanny_profile() -> tuple[dict, int]:
+    user = get_user_from_token()
+    if not user:
+        return {"error": "unauthorized"}, 401
+    if user["role"] != "nanny":
+        return {"error": "only nannies have profiles"}, 403
+
+    with get_db() as conn:
+        profile = conn.execute(
+            "SELECT * FROM nanny_profiles WHERE user_id = ?",
+            (user["id"],),
+        ).fetchone()
+
+    if not profile:
+        return {"error": "not found"}, 404
+
+    return dict(profile), 200
+
+
+@app.get("/api/family_profiles/me")
+def get_my_family_profile() -> tuple[dict, int]:
+    user = get_user_from_token()
+    if not user:
+        return {"error": "unauthorized"}, 401
+    if user["role"] != "family":
+        return {"error": "only families have profiles"}, 403
+
+    with get_db() as conn:
+        profile = conn.execute(
+            "SELECT * FROM family_profiles WHERE user_id = ?",
+            (user["id"],),
+        ).fetchone()
+
+    if not profile:
+        return {"error": "not found"}, 404
+
+    return dict(profile), 200
+
+
 @app.post("/api/contact_requests")
 def create_contact_request() -> tuple[dict, int]:
     user = get_user_from_token()
@@ -397,6 +553,29 @@ def create_contact_request() -> tuple[dict, int]:
         )
         conn.commit()
 
+    try:
+        payload = json.dumps(
+            {
+                "contact_request_id": contact_request_id,
+                "message": {
+                    "contact_request_id": contact_request_id,
+                    "sender_id": user["id"],
+                    "body": message,
+                    "created_at": created_at,
+                    "sender_email": user["email"],
+                },
+            }
+        ).encode("utf-8")
+        request_obj = urllib.request.Request(
+            WS_PUBLISH_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(request_obj, timeout=1.5)
+    except Exception:
+        pass
+
     return {"id": contact_request_id, "status": "pending"}, 201
 
 
@@ -431,6 +610,29 @@ def list_contact_requests() -> tuple[dict, int]:
             ).fetchall()
 
     return {"results": [dict(row) for row in rows]}, 200
+
+
+@app.delete("/api/contact_requests/<int:contact_request_id>")
+def delete_contact_request(contact_request_id: int) -> tuple[dict, int]:
+    user = get_user_from_token()
+    if not user:
+        return {"error": "unauthorized"}, 401
+
+    with get_db() as conn:
+        allowed = conn.execute(
+            """
+            SELECT id FROM contact_requests
+            WHERE id = ? AND (family_id = ? OR nanny_id = ?)
+            """,
+            (contact_request_id, user["id"], user["id"]),
+        ).fetchone()
+        if not allowed:
+            return {"error": "not found"}, 404
+
+        conn.execute("DELETE FROM contact_requests WHERE id = ?", (contact_request_id,))
+        conn.commit()
+
+    return {"ok": True}, 200
 
 
 @app.get("/api/messages")
@@ -502,13 +704,33 @@ def create_message() -> tuple[dict, int]:
         )
         conn.commit()
 
-    return {
+    response = {
         "id": cursor.lastrowid,
         "contact_request_id": contact_request_id,
         "sender_id": user["id"],
         "body": body,
         "created_at": created_at,
-    }, 201
+        "sender_email": user["email"],
+    }
+
+    try:
+        payload = json.dumps(
+            {
+                "contact_request_id": contact_request_id,
+                "message": response,
+            }
+        ).encode("utf-8")
+        request_obj = urllib.request.Request(
+            WS_PUBLISH_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(request_obj, timeout=1.5)
+    except Exception:
+        pass
+
+    return response, 201
 
 
 @app.get("/api/messages/last")
