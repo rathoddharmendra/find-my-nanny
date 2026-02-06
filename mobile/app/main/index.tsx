@@ -1313,6 +1313,8 @@ export default function HomeScreen() {
                       placeholder="Type a message"
                       value={messageDraft}
                       onChangeText={setMessageDraft}
+                      returnKeyType="send"
+                      onSubmitEditing={sendMessage}
                     />
                     <TouchableOpacity
                       style={[styles.button, loading && styles.buttonDisabled]}

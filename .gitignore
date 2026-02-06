@@ -1,0 +1,6 @@
+.DS_Store
+.*
+!.gitignore
+project.md
+internal-readme.md
+*.db
