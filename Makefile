@@ -4,8 +4,8 @@ dev:
 	@osascript -e 'tell application "Terminal"' \
 		-e 'activate' \
 		-e 'do script "cd /Users/mac_dee/Documents/Find-my-nanny/backend && python app.py"' \
-		-e 'do script "cd /Users/mac_dee/Documents/Find-my-nanny/backend/ws-server && npm install && npm start" in selected tab of the front window' \
-		-e 'do script "cd /Users/mac_dee/Documents/Find-my-nanny/mobile && npm install && npx expo start" in selected tab of the front window' \
+		-e 'do script "cd /Users/mac_dee/Documents/Find-my-nanny/backend/ws-server && npm install && npm start" in front window' \
+		-e 'do script "cd /Users/mac_dee/Documents/Find-my-nanny/mobile && npm install && npx expo start" in front window' \
 		-e 'end tell'
 
 backend:
