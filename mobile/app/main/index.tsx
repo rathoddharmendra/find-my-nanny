@@ -136,6 +136,109 @@ export default function HomeScreen() {
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [showProfileOverlay, setShowProfileOverlay] = useState(false);
 
+  const refreshThreads = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/contact_requests`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok && data && data.results) {
+        setThreads(data.results);
+      }
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  const refreshLatestMessage = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/messages/last`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok && data && data.message) {
+        setLatestMessage(data.message);
+      } else if (res.ok) {
+        setLatestMessage(null);
+      }
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  const refreshMyProfile = async (roleToLoad: User["role"]) => {
+    if (!token) return;
+    const endpoint =
+      roleToLoad === "family"
+        ? `${API_BASE_URL}/api/family_profiles/me`
+        : `${API_BASE_URL}/api/nanny_profiles/me`;
+    try {
+      const res = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (roleToLoad === "family") {
+          setSavedFamilyProfile(null);
+          setFamilyForm({
+            full_name: "",
+            city: "",
+            zip: "",
+            needs: "",
+            schedule: "",
+            budget: "",
+            bio: "",
+            contact_info: "",
+          });
+        } else {
+          setSavedProfile(null);
+          setProfileForm({
+            full_name: "",
+            city: "",
+            zip: "",
+            years_experience: "",
+            availability: "",
+            bio: "",
+            services_offered: "",
+            preferred_rate: "",
+            contact_info: "",
+          });
+        }
+        return;
+      }
+      if (roleToLoad === "family") {
+        setSavedFamilyProfile(data);
+        setFamilyForm({
+          full_name: data.full_name || "",
+          city: data.city || "",
+          zip: data.zip || "",
+          needs: data.needs || "",
+          schedule: data.schedule || "",
+          budget: data.budget || "",
+          bio: data.bio || "",
+          contact_info: data.contact_info || "",
+        });
+      } else {
+        setSavedProfile(data);
+        setProfileForm({
+          full_name: data.full_name || "",
+          city: data.city || "",
+          zip: data.zip || "",
+          years_experience: String(data.years_experience ?? ""),
+          availability: data.availability || "",
+          bio: data.bio || "",
+          services_offered: data.services_offered || "",
+          preferred_rate: String(data.preferred_rate ?? ""),
+          contact_info: data.contact_info || "",
+        });
+      }
+    } catch (err) {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     const restoreSession = async () => {
       try {
@@ -168,67 +271,15 @@ export default function HomeScreen() {
       .then((data) => {
         if (data) {
           setUser(data);
+          refreshMyProfile(data.role);
         }
       })
       .catch(() => {
         setUser(null);
       });
 
-    fetch(`${API_BASE_URL}/api/messages/last`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && data.message) {
-          setLatestMessage(data.message);
-        } else {
-          setLatestMessage(null);
-        }
-      })
-      .catch(() => {
-        setLatestMessage(null);
-      });
-
-    fetch(`${API_BASE_URL}/api/contact_requests`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && data.results) {
-          setThreads(data.results);
-        } else {
-          setThreads([]);
-        }
-      })
-      .catch(() => {
-        setThreads([]);
-      });
-
-    fetch(`${API_BASE_URL}/api/nanny_profiles/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && data.id) {
-          setSavedProfile(data);
-        }
-      })
-      .catch(() => {
-        // ignore
-      });
-
-    fetch(`${API_BASE_URL}/api/family_profiles/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && data.id) {
-          setSavedFamilyProfile(data);
-        }
-      })
-      .catch(() => {
-        // ignore
-      });
+    refreshLatestMessage();
+    refreshThreads();
   }, [token]);
 
   useEffect(() => {
@@ -256,6 +307,7 @@ export default function HomeScreen() {
             created_at: payload.message.created_at,
             sender_email: payload.message.sender_email || "",
           });
+          refreshThreads();
         }
       } catch (err) {
         // ignore
@@ -560,6 +612,7 @@ export default function HomeScreen() {
         created_at: new Date().toISOString(),
         nanny_name: selectedProfile.full_name,
       });
+      refreshThreads();
     } catch (err) {
       if (err instanceof Error) {
         setStatus(`Network error: ${err.message}`);
@@ -623,6 +676,7 @@ export default function HomeScreen() {
         created_at: data.created_at,
         sender_email: user?.email || "",
       });
+      refreshThreads();
       setMessageDraft("");
     } catch (err) {
       setStatus("Network error. Check API_BASE_URL.");
