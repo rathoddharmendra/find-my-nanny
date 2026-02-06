@@ -10,7 +10,15 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../config";
-const WS_BASE_URL = "ws://localhost:5050";
+const WS_BASE_URL = (() => {
+  try {
+    const url = new URL(API_BASE_URL);
+    const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return `${wsProtocol}//${url.hostname}:5050`;
+  } catch (err) {
+    return "ws://localhost:5050";
+  }
+})();
 
 type User = {
   id: number;
