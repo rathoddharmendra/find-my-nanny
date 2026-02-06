@@ -48,6 +48,7 @@ type ContactRequest = {
   created_at: string;
   nanny_name?: string;
   family_email?: string;
+  family_name?: string;
 };
 
 type Message = {
@@ -1272,11 +1273,11 @@ export default function HomeScreen() {
                     >
                       <View style={styles.messageListRow}>
                         <View style={styles.messageListText}>
-                          <Text style={styles.resultName}>
-                            {user.role === "family"
-                              ? thread.nanny_name || "Nanny"
-                              : thread.family_email || "Family"}
-                          </Text>
+                      <Text style={styles.resultName}>
+                        {user.role === "family"
+                          ? thread.nanny_name || "Nanny"
+                          : thread.family_name || thread.family_email || "Family"}
+                      </Text>
                           <Text style={styles.resultMeta}>
                             {thread.status} •{" "}
                             {new Date(thread.created_at).toLocaleDateString()}
@@ -1286,7 +1287,7 @@ export default function HomeScreen() {
                           style={styles.deleteButton}
                           onPress={() => deleteThread(thread)}
                         >
-                          <Text style={styles.deleteButtonText}>Delete</Text>
+                          <Text style={styles.deleteButtonText}>X</Text>
                         </TouchableOpacity>
                       </View>
                     </TouchableOpacity>

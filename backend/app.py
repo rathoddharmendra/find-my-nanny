@@ -600,9 +600,10 @@ def list_contact_requests() -> tuple[dict, int]:
         else:
             rows = conn.execute(
                 """
-                SELECT cr.*, u.email AS family_email
+                SELECT cr.*, u.email AS family_email, fp.full_name AS family_name
                 FROM contact_requests cr
                 JOIN users u ON u.id = cr.family_id
+                LEFT JOIN family_profiles fp ON fp.user_id = cr.family_id
                 WHERE cr.nanny_id = ?
                 ORDER BY cr.created_at DESC
                 """,
